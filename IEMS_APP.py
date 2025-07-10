@@ -157,10 +157,11 @@ st.title("Calculadora de Índices Microclimáticos do Solo")
 
 opcao_entrada = st.radio(
     "Escolha a forma de entrada dos dados:",
-    ("Upload do arquivo Excel", "Preencher tabela manualmente")
+    ("Upload do arquivo Excel", "Colar dados manualmente na tabela (estilo Excel)")
 )
 
 planilhas = None
+
 if opcao_entrada == "Upload do arquivo Excel":
     uploaded_file = st.file_uploader("Envie seu arquivo Excel com várias abas", type=["xlsx"])
     if uploaded_file is not None:
@@ -169,20 +170,29 @@ if opcao_entrada == "Upload do arquivo Excel":
         st.write(f"Abas encontradas: {abas}")
         planilhas = {aba: xls.parse(aba) for aba in abas}
 
-elif opcao_entrada == "Preencher tabela manualmente":
-    st.write("Preencha os dados na tabela abaixo (colunas fixas):")
-    colunas = ['Data', 'U20', 'T20', 'U40', 'T40', 'U60', 'T60']
-    dados_vazios = pd.DataFrame(columns=colunas)
-    dados_editados = st.data_editor(dados_vazios, num_rows="dynamic", use_container_width=True)
+elif opcao_entrada == "Colar dados manualmente na tabela (estilo Excel)":
+    st.markdown("**Cole os dados diretamente na tabela abaixo. Use colunas como 'Data', 'U20', 'T20', etc.**")
 
-    if not dados_editados.empty and dados_editados['Data'].notna().any():
+    colunas_fixas = ['Data', 'U20', 'T20', 'U40', 'T40', 'U60', 'T60']
+    df_vazio = pd.DataFrame(columns=colunas_fixas)
+
+    df_editado = st.experimental_data_editor(
+        df_vazio,
+        num_rows="dynamic",
+        use_container_width=True,
+        height=500
+    )
+
+    if not df_editado.dropna(how="all").empty:
         try:
-            dados_editados['Data'] = pd.to_datetime(dados_editados['Data'])
-            for col in colunas[1:]:
-                dados_editados[col] = pd.to_numeric(dados_editados[col], errors='coerce')
-            planilhas = {"DadosColados": dados_editados}
+            df_editado['Data'] = pd.to_datetime(df_editado['Data'], errors='coerce')
+            for col in df_editado.columns:
+                if col != 'Data':
+                    df_editado[col] = pd.to_numeric(df_editado[col], errors='coerce')
+            planilhas = {"Colado": df_editado}
         except Exception as e:
-            st.error(f"Erro ao processar a tabela: {e}")
+            st.error(f"Erro ao processar os dados colados: {e}")
+
 
 # Parâmetros
 st.sidebar.header("Parâmetros de referência")
