@@ -5,6 +5,8 @@ from plotnine import *
 import matplotlib.pyplot as plt
 from io import BytesIO
 import io  # para ler texto colado
+import os
+import threading
 
 # ---------------- FUNÇÕES DE CÁLCULO ------------------
 def calcula_umax_global(df):
@@ -155,7 +157,7 @@ st.title("Calculadora de Índices Microclimáticos do Solo")
 
 opcao_entrada = st.radio(
     "Escolha a forma de entrada dos dados:",
-    ("Upload do arquivo Excel", "Colar dados CSV/TSV")
+    ("Upload do arquivo Excel", "Preencher tabela manualmente")
 )
 
 planilhas = None
@@ -167,18 +169,20 @@ if opcao_entrada == "Upload do arquivo Excel":
         st.write(f"Abas encontradas: {abas}")
         planilhas = {aba: xls.parse(aba) for aba in abas}
 
-elif opcao_entrada == "Colar dados CSV/TSV":
-    texto_dados = st.text_area(
-        "Cole os dados CSV/TSV aqui (colunas separadas por vírgula ou tab):",
-        height=200
-    )
-    if texto_dados:
+elif opcao_entrada == "Preencher tabela manualmente":
+    st.write("Preencha os dados na tabela abaixo (colunas fixas):")
+    colunas = ['Data', 'U20', 'T20', 'U40', 'T40', 'U60', 'T60']
+    dados_vazios = pd.DataFrame(columns=colunas)
+    dados_editados = st.data_editor(dados_vazios, num_rows="dynamic", use_container_width=True)
+
+    if not dados_editados.empty and dados_editados['Data'].notna().any():
         try:
-            planilhas = {"DadosColados": pd.read_csv(io.StringIO(texto_dados), sep=None, engine='python')}
-            st.write("Dados colados:")
-            st.dataframe(planilhas["DadosColados"].head())
+            dados_editados['Data'] = pd.to_datetime(dados_editados['Data'])
+            for col in colunas[1:]:
+                dados_editados[col] = pd.to_numeric(dados_editados[col], errors='coerce')
+            planilhas = {"DadosColados": dados_editados}
         except Exception as e:
-            st.error(f"Erro ao ler os dados colados: {e}")
+            st.error(f"Erro ao processar a tabela: {e}")
 
 # Parâmetros
 st.sidebar.header("Parâmetros de referência")
@@ -256,12 +260,9 @@ if planilhas is not None:
     else:
         st.warning("Não foi possível calcular os índices para os dados enviados.")
 else:
-    st.info("Envie um arquivo Excel ou cole os dados para iniciar o cálculo.")
+    st.info("Envie um arquivo Excel ou preencha a tabela para iniciar o cálculo.")
 
 # --- Botão para encerrar o aplicativo ---
-import os
-import threading
-
 def fechar_app():
     def delayed_shutdown():
         import time
@@ -273,4 +274,3 @@ st.markdown("---")  # Linha separadora
 if st.button("🚪 Encerrar aplicativo"):
     st.warning("Encerrando o aplicativo...")
     fechar_app()
-
