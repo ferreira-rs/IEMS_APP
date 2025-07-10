@@ -4,6 +4,7 @@ import numpy as np
 from plotnine import *
 import matplotlib.pyplot as plt
 from io import BytesIO
+import io  # para ler texto colado
 
 # ---------------- FUNÇÕES DE CÁLCULO ------------------
 def calcula_umax_global(df):
@@ -22,9 +23,7 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   lim_sup_pct=0.9):
     dados = dados.copy()
     dados['Data'] = pd.to_datetime(dados['Data'])
-    # Substitui zeros por NaN só nas colunas numéricas
-    for col in dados.select_dtypes(include=[np.number]).columns:
-        dados[col] = dados[col].replace(0, np.nan)
+    dados = dados.apply(lambda x: x.replace(0, np.nan) if np.issubdtype(x.dtype, np.number) else x)
 
     profundidades = [20, 40, 60]
     resultados = []
@@ -32,35 +31,27 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
     for prof in profundidades:
         u_col = f'U{prof}'
         t_col = f'T{prof}'
-
-        # Se não tiver coluna de umidade, ignora esta profundidade
-        if u_col not in dados.columns:
+        if not (u_col in dados.columns and t_col in dados.columns):
             continue
 
         umid = dados.groupby('Data')[u_col].mean()
+        tmax = dados.groupby('Data')[t_col].max()
+        tmin = dados.groupby('Data')[t_col].min()
+        tmed = dados.groupby('Data')[t_col].mean()
 
-        if t_col in dados.columns:
-            tmax = dados.groupby('Data')[t_col].max()
-            tmin = dados.groupby('Data')[t_col].min()
-            tmed = dados.groupby('Data')[t_col].mean()
+        resumo = pd.DataFrame({
+            'Umid': umid,
+            'Tmax': tmax,
+            'Tmin': tmin,
+            'Tmed': tmed
+        }).dropna()
+        resumo['Tamp'] = resumo['Tmax'] - resumo['Tmin']
 
-            resumo = pd.DataFrame({
-                'Umid': umid,
-                'Tmax': tmax,
-                'Tmin': tmin,
-                'Tmed': tmed
-            }).dropna()
-
-            resumo['Tamp'] = resumo['Tmax'] - resumo['Tmin']
-
-            IETS = 1 - (
-                (abs(resumo['Tmed'].mean() - Tref_med) / Tref_med +
-                 resumo['Tmax'].mean() / Tref_max +
-                 resumo['Tamp'].mean() / Tref_amp) / 3
-            )
-        else:
-            resumo = pd.DataFrame({'Umid': umid}).dropna()
-            IETS = np.nan  # Se não tem temperatura, deixa NaN para IETS
+        IETS = 1 - (
+            (abs(resumo['Tmed'].mean() - Tref_med) / Tref_med +
+             resumo['Tmax'].mean() / Tref_max +
+             resumo['Tamp'].mean() / Tref_amp) / 3
+        )
 
         if Umax_ref is not None and u_col in Umax_ref:
             Umax = Umax_ref[u_col]
@@ -73,11 +64,7 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
         prop = ((resumo['Umid'] >= lim_inf) & (resumo['Umid'] <= lim_sup)).mean()
         IRHE = prop
 
-        # Se IETS é NaN (faltando temp), calcula IEMS só com IRHE
-        if not np.isnan(IETS):
-            IEMS = (IETS + IRHE) / 2
-        else:
-            IEMS = IRHE
+        IEMS = (IETS + IRHE) / 2
 
         resultados.append({
             'Profundidade': prof,
@@ -89,7 +76,6 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
     if not resultados:
         return None
     return pd.DataFrame(resultados)
-
 
 def calcula_por_ano_periodo(df, nome_df,
                             Tref_med=25,
@@ -167,7 +153,32 @@ def gerar_png_para_download(plot, nome_arquivo="grafico.png", dpi=300):
 st.set_page_config(page_title="Índice Microclimático", layout="wide")
 st.title("Calculadora de Índices Microclimáticos do Solo")
 
-uploaded_file = st.file_uploader("Envie seu arquivo Excel com várias abas", type=["xlsx"])
+opcao_entrada = st.radio(
+    "Escolha a forma de entrada dos dados:",
+    ("Upload do arquivo Excel", "Colar dados CSV/TSV")
+)
+
+planilhas = None
+if opcao_entrada == "Upload do arquivo Excel":
+    uploaded_file = st.file_uploader("Envie seu arquivo Excel com várias abas", type=["xlsx"])
+    if uploaded_file is not None:
+        xls = pd.ExcelFile(uploaded_file)
+        abas = xls.sheet_names
+        st.write(f"Abas encontradas: {abas}")
+        planilhas = {aba: xls.parse(aba) for aba in abas}
+
+elif opcao_entrada == "Colar dados CSV/TSV":
+    texto_dados = st.text_area(
+        "Cole os dados CSV/TSV aqui (colunas separadas por vírgula ou tab):",
+        height=200
+    )
+    if texto_dados:
+        try:
+            planilhas = {"DadosColados": pd.read_csv(io.StringIO(texto_dados), sep=None, engine='python')}
+            st.write("Dados colados:")
+            st.dataframe(planilhas["DadosColados"].head())
+        except Exception as e:
+            st.error(f"Erro ao ler os dados colados: {e}")
 
 # Parâmetros
 st.sidebar.header("Parâmetros de referência")
@@ -177,12 +188,7 @@ Tref_amp = st.sidebar.number_input("Amplitude térmica ideal (°C)", value=10.0)
 lim_inf_pct = st.sidebar.slider("Limite inferior umidade (% Umax)", 0.0, 1.0, 0.8)
 lim_sup_pct = st.sidebar.slider("Limite superior umidade (% Umax)", 0.0, 1.0, 0.9)
 
-if uploaded_file is not None:
-    xls = pd.ExcelFile(uploaded_file)
-    abas = xls.sheet_names
-    planilhas = {aba: xls.parse(aba) for aba in abas}
-    st.write(f"Abas encontradas: {abas}")
-
+if planilhas is not None:
     resultados_ilp = calcula_para_varias_planilhas(
         planilhas,
         Tref_med=Tref_med,
@@ -250,7 +256,8 @@ if uploaded_file is not None:
     else:
         st.warning("Não foi possível calcular os índices para os dados enviados.")
 else:
-    st.info("Faça upload do arquivo Excel para iniciar o cálculo.")
+    st.info("Envie um arquivo Excel ou cole os dados para iniciar o cálculo.")
+
 # --- Botão para encerrar o aplicativo ---
 import os
 import threading
@@ -266,3 +273,4 @@ st.markdown("---")  # Linha separadora
 if st.button("🚪 Encerrar aplicativo"):
     st.warning("Encerrando o aplicativo...")
     fechar_app()
+
