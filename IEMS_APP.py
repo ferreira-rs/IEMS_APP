@@ -157,7 +157,7 @@ st.title("Calculadora de Índices Microclimáticos do Solo")
 
 opcao_entrada = st.radio(
     "Escolha a forma de entrada dos dados:",
-    ("Upload do arquivo Excel", "Colar dados manualmente na tabela (estilo Excel)")
+    ("Upload do arquivo Excel", "Colar dados manualmente por coluna")
 )
 
 planilhas = None
@@ -170,29 +170,34 @@ if opcao_entrada == "Upload do arquivo Excel":
         st.write(f"Abas encontradas: {abas}")
         planilhas = {aba: xls.parse(aba) for aba in abas}
 
-elif opcao_entrada == "Colar dados manualmente na tabela (estilo Excel)":
-    st.markdown("**Cole os dados diretamente na tabela abaixo. Use colunas como 'Data', 'U20', 'T20', etc.**")
+elif opcao_entrada == "Colar dados manualmente por coluna":
+    st.markdown("Cole os dados separadamente para cada coluna esperada (ex: Data, U20, T20, etc.).")
+    colunas_esperadas = ['Data', 'U20', 'T20', 'U40', 'T40', 'U60', 'T60']
+    dados_colunas = {}
 
-    colunas_fixas = ['Data', 'U20', 'T20', 'U40', 'T40', 'U60', 'T60']
-    df_vazio = pd.DataFrame(columns=colunas_fixas)
+    for col in colunas_esperadas:
+        texto = st.text_area(f"📋 Coluna: {col}", height=150, key=col)
+        linhas = texto.strip().splitlines() if texto.strip() else []
+        dados_colunas[col] = linhas
 
-    df_editado = st.data_editor(
-        df_vazio,
-        num_rows="dynamic",
-        use_container_width=True,
-        height=500
-    )
+    alguma_coluna_tem_dado = any(len(v) > 0 for v in dados_colunas.values())
 
-    if not df_editado.dropna(how="all").empty:
-        try:
-            df_editado['Data'] = pd.to_datetime(df_editado['Data'], errors='coerce')
-            for col in df_editado.columns:
-                if col != 'Data':
-                    df_editado[col] = pd.to_numeric(df_editado[col], errors='coerce')
-            planilhas = {"Colado": df_editado}
-        except Exception as e:
-            st.error(f"Erro ao processar os dados colados: {e}")
+    if alguma_coluna_tem_dado:
+        max_linhas = max(len(v) for v in dados_colunas.values())
+        for col in colunas_esperadas:
+            valores = dados_colunas[col]
+            if len(valores) < max_linhas:
+                valores += ["" for _ in range(max_linhas - len(valores))]
+            dados_colunas[col] = valores
 
+        df_colado = pd.DataFrame(dados_colunas)
+        for col in df_colado.columns:
+            if col != 'Data':
+                df_colado[col] = pd.to_numeric(df_colado[col], errors='coerce')
+        df_colado['Data'] = pd.to_datetime(df_colado['Data'], errors='coerce')
+        planilhas = {"Colado": df_colado}
+        st.success("✅ Tabela montada com sucesso!")
+        st.dataframe(df_colado.head())
 
 # Parâmetros
 st.sidebar.header("Parâmetros de referência")
@@ -270,7 +275,7 @@ if planilhas is not None:
     else:
         st.warning("Não foi possível calcular os índices para os dados enviados.")
 else:
-    st.info("Envie um arquivo Excel ou preencha a tabela para iniciar o cálculo.")
+    st.info("Envie um arquivo Excel ou preencha os dados manualmente para iniciar o cálculo.")
 
 # --- Botão para encerrar o aplicativo ---
 def fechar_app():
