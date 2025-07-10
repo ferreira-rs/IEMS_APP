@@ -22,7 +22,9 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   lim_sup_pct=0.9):
     dados = dados.copy()
     dados['Data'] = pd.to_datetime(dados['Data'])
-    dados = dados.apply(lambda x: x.replace(0, np.nan) if np.issubdtype(x.dtype, np.number) else x)
+    # Substitui zeros por NaN só nas colunas numéricas
+    for col in dados.select_dtypes(include=[np.number]).columns:
+        dados[col] = dados[col].replace(0, np.nan)
 
     profundidades = [20, 40, 60]
     resultados = []
@@ -30,27 +32,35 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
     for prof in profundidades:
         u_col = f'U{prof}'
         t_col = f'T{prof}'
-        if not (u_col in dados.columns and t_col in dados.columns):
+
+        # Se não tiver coluna de umidade, ignora esta profundidade
+        if u_col not in dados.columns:
             continue
 
         umid = dados.groupby('Data')[u_col].mean()
-        tmax = dados.groupby('Data')[t_col].max()
-        tmin = dados.groupby('Data')[t_col].min()
-        tmed = dados.groupby('Data')[t_col].mean()
 
-        resumo = pd.DataFrame({
-            'Umid': umid,
-            'Tmax': tmax,
-            'Tmin': tmin,
-            'Tmed': tmed
-        }).dropna()
-        resumo['Tamp'] = resumo['Tmax'] - resumo['Tmin']
+        if t_col in dados.columns:
+            tmax = dados.groupby('Data')[t_col].max()
+            tmin = dados.groupby('Data')[t_col].min()
+            tmed = dados.groupby('Data')[t_col].mean()
 
-        IETS = 1 - (
-            (abs(resumo['Tmed'].mean() - Tref_med) / Tref_med +
-             resumo['Tmax'].mean() / Tref_max +
-             resumo['Tamp'].mean() / Tref_amp) / 3
-        )
+            resumo = pd.DataFrame({
+                'Umid': umid,
+                'Tmax': tmax,
+                'Tmin': tmin,
+                'Tmed': tmed
+            }).dropna()
+
+            resumo['Tamp'] = resumo['Tmax'] - resumo['Tmin']
+
+            IETS = 1 - (
+                (abs(resumo['Tmed'].mean() - Tref_med) / Tref_med +
+                 resumo['Tmax'].mean() / Tref_max +
+                 resumo['Tamp'].mean() / Tref_amp) / 3
+            )
+        else:
+            resumo = pd.DataFrame({'Umid': umid}).dropna()
+            IETS = np.nan  # Se não tem temperatura, deixa NaN para IETS
 
         if Umax_ref is not None and u_col in Umax_ref:
             Umax = Umax_ref[u_col]
@@ -63,7 +73,11 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
         prop = ((resumo['Umid'] >= lim_inf) & (resumo['Umid'] <= lim_sup)).mean()
         IRHE = prop
 
-        IEMS = (IETS + IRHE) / 2
+        # Se IETS é NaN (faltando temp), calcula IEMS só com IRHE
+        if not np.isnan(IETS):
+            IEMS = (IETS + IRHE) / 2
+        else:
+            IEMS = IRHE
 
         resultados.append({
             'Profundidade': prof,
@@ -75,6 +89,7 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
     if not resultados:
         return None
     return pd.DataFrame(resultados)
+
 
 def calcula_por_ano_periodo(df, nome_df,
                             Tref_med=25,
