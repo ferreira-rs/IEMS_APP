@@ -176,7 +176,7 @@ elif opcao_entrada == "Colar dados manualmente na tabela (estilo Excel)":
     colunas_fixas = ['Data', 'U20', 'T20', 'U40', 'T40', 'U60', 'T60']
     df_vazio = pd.DataFrame(columns=colunas_fixas)
 
-    df_editado = st.experimental_data_editor(
+    df_editado = st.data_editor(
         df_vazio,
         num_rows="dynamic",
         use_container_width=True,
