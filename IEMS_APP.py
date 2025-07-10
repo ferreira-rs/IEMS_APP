@@ -23,7 +23,8 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   lim_inf_pct=0.8,
                                   lim_sup_pct=0.9):
     dados = dados.copy()
-    dados['Data'] = pd.to_datetime(dados['Data'], errors='coerce')  # evita erros
+    # Converte e normaliza a coluna Data (zera hora)
+    dados['Data'] = pd.to_datetime(dados['Data'], errors='coerce').dt.normalize()
 
     # Substitui zeros por NaN só nas colunas numéricas
     for col in dados.select_dtypes(include=[np.number]).columns:
@@ -34,13 +35,11 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
 
     for prof in profundidades:
         u_col = f'U{prof}'
-        t_col = f'T{prof}'
-
         if u_col not in dados.columns:
             continue
-
         umid = dados.groupby('Data')[u_col].mean()
 
+        t_col = f'T{prof}'
         if t_col in dados.columns:
             tmax = dados.groupby('Data')[t_col].max()
             tmin = dados.groupby('Data')[t_col].min()
@@ -98,7 +97,8 @@ def calcula_por_ano_periodo(df, nome_df,
                             lim_inf_pct=0.8,
                             lim_sup_pct=0.9):
     df = df.copy()
-    df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+    # Converte e normaliza a coluna Data (zera hora)
+    df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.normalize()
     df['Mes'] = df['Data'].dt.month
     df['Ano'] = df['Data'].dt.year
 
