@@ -8,13 +8,17 @@ import os
 import threading
 
 # ---------------- FUNÇÕES DE CÁLCULO ------------------
+
 def calcula_umax_global(df):
-    Umax = {}
+    Ustats = {}
     for prof in [20, 40, 60]:
         u_col = f'U{prof}'
         if u_col in df.columns:
-            Umax[u_col] = df[u_col].max(skipna=True)
-    return Umax
+            Ustats[u_col] = {
+                'max': df[u_col].max(skipna=True),
+                'min': df[u_col].min(skipna=True)
+            }
+    return Ustats
 
 def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   Tref_med=25,
@@ -36,7 +40,9 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
         u_col = f'U{prof}'
         if u_col not in dados.columns:
             continue
-        umid = dados.groupby('Data')[u_col].mean()
+
+        # Média diária para proporção IRHE
+        umid_diaria = dados.groupby('Data')[u_col].mean()
 
         t_col = f'T{prof}'
         if t_col in dados.columns:
@@ -45,7 +51,7 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
             tmed = dados.groupby('Data')[t_col].mean()
 
             resumo = pd.DataFrame({
-                'Umid': umid,
+                'Umid': umid_diaria,
                 'Tmax': tmax,
                 'Tmin': tmin,
                 'Tmed': tmed
@@ -59,22 +65,24 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
                  resumo['Tamp'].mean() / Tref_amp) / 3
             )
         else:
-            resumo = pd.DataFrame({'Umid': umid}).dropna()
+            resumo = pd.DataFrame({'Umid': umid_diaria}).dropna()
             IETS = np.nan
 
+        # Usa Umax e Umin globais para definição dos limites
         if Umax_ref is not None and u_col in Umax_ref:
-            Umax = Umax_ref[u_col]
+            Umax_global = Umax_ref[u_col]['max']
+            Umin_global = Umax_ref[u_col]['min']
         else:
-            Umax = resumo['Umid'].max()
+            Umax_global = dados[u_col].max(skipna=True)
+            Umin_global = dados[u_col].min(skipna=True)
 
         if metodo_umidade == "Baseado na amplitude real":
-            Umin = resumo['Umid'].min()
-            amplitude = Umax - Umin
-            lim_inf = Umax - (amplitude * lim_inf_pct)
-            lim_sup = Umax - (amplitude * lim_sup_pct)
+            amplitude = Umax_global - Umin_global
+            lim_inf = Umax_global - (amplitude * lim_inf_pct)
+            lim_sup = Umax_global - (amplitude * lim_sup_pct)
         else:
-            lim_inf = Umax * lim_inf_pct
-            lim_sup = Umax * lim_sup_pct
+            lim_inf = Umax_global * lim_inf_pct
+            lim_sup = Umax_global * lim_sup_pct
 
         prop = ((resumo['Umid'] >= lim_inf) & (resumo['Umid'] <= lim_sup)).mean()
         IRHE = prop
@@ -174,6 +182,7 @@ def to_excel(df):
     return output.getvalue()
 
 # ---------------- INTERFACE STREAMLIT ------------------
+
 st.set_page_config(page_title="Índice Microclimático", layout="wide")
 st.title("Calculadora de Índices Microclimáticos do Solo")
 
