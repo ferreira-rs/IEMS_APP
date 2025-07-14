@@ -21,12 +21,11 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   Tref_max=35,
                                   Tref_amp=10,
                                   lim_inf_pct=0.8,
-                                  lim_sup_pct=0.9):
+                                  lim_sup_pct=0.9,
+                                  metodo_umidade="Tradicional (percentual da Umax)"):
     dados = dados.copy()
-    # Converte e normaliza a coluna Data (zera hora)
     dados['Data'] = pd.to_datetime(dados['Data'], errors='coerce').dt.normalize()
 
-    # Substitui zeros por NaN só nas colunas numéricas
     for col in dados.select_dtypes(include=[np.number]).columns:
         dados[col] = dados[col].replace(0, np.nan)
 
@@ -68,16 +67,19 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
         else:
             Umax = resumo['Umid'].max()
 
-        lim_inf = lim_inf_pct * Umax
-        lim_sup = lim_sup_pct * Umax
+        if metodo_umidade == "Baseado na amplitude real":
+            Umin = resumo['Umid'].min()
+            amplitude = Umax - Umin
+            lim_inf = Umax - (amplitude * lim_inf_pct)
+            lim_sup = Umax - (amplitude * lim_sup_pct)
+        else:
+            lim_inf = Umax * lim_inf_pct
+            lim_sup = Umax * lim_sup_pct
 
         prop = ((resumo['Umid'] >= lim_inf) & (resumo['Umid'] <= lim_sup)).mean()
         IRHE = prop
 
-        if not np.isnan(IETS):
-            IEMS = (IETS + IRHE) / 2
-        else:
-            IEMS = IRHE
+        IEMS = (IETS + IRHE) / 2 if not np.isnan(IETS) else IRHE
 
         resultados.append({
             'Profundidade': prof,
@@ -95,13 +97,12 @@ def calcula_por_ano_periodo(df, nome_df,
                             Tref_max=35,
                             Tref_amp=10,
                             lim_inf_pct=0.8,
-                            lim_sup_pct=0.9):
+                            lim_sup_pct=0.9,
+                            metodo_umidade="Tradicional (percentual da Umax)"):
     df = df.copy()
-    # Converte e normaliza a coluna Data (zera hora)
     df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.normalize()
     df['Mes'] = df['Data'].dt.month
     df['Ano'] = df['Data'].dt.year
-
     df['Periodo'] = np.where(df['Mes'].isin([10,11,12,1,2,3]), 'Umido', 'Seco')
     df['AnoRef'] = np.where(df['Mes'].isin([1,2,3]), df['Ano'] -1, df['Ano'])
 
@@ -120,7 +121,8 @@ def calcula_por_ano_periodo(df, nome_df,
             Tref_max=Tref_max,
             Tref_amp=Tref_amp,
             lim_inf_pct=lim_inf_pct,
-            lim_sup_pct=lim_sup_pct
+            lim_sup_pct=lim_sup_pct,
+            metodo_umidade=metodo_umidade
         )
         if res is None:
             continue
@@ -138,7 +140,8 @@ def calcula_para_varias_planilhas(nome_planilhas,
                                   Tref_max=35,
                                   Tref_amp=10,
                                   lim_inf_pct=0.8,
-                                  lim_sup_pct=0.9):
+                                  lim_sup_pct=0.9,
+                                  metodo_umidade="Tradicional (percentual da Umax)"):
     resultados = []
     for nome_df, df in nome_planilhas.items():
         res = calcula_por_ano_periodo(
@@ -148,7 +151,8 @@ def calcula_para_varias_planilhas(nome_planilhas,
             Tref_max,
             Tref_amp,
             lim_inf_pct,
-            lim_sup_pct
+            lim_sup_pct,
+            metodo_umidade
         )
         if res is not None:
             resultados.append(res)
@@ -180,8 +184,18 @@ st.sidebar.header("Parâmetros de referência")
 Tref_med = st.sidebar.number_input("Temperatura média ideal (°C)", value=25.0)
 Tref_max = st.sidebar.number_input("Temperatura máxima ideal (°C)", value=35.0)
 Tref_amp = st.sidebar.number_input("Amplitude térmica ideal (°C)", value=10.0)
-lim_inf_pct = st.sidebar.slider("Limite inferior umidade (% Umax)", 0.0, 1.0, 0.8)
-lim_sup_pct = st.sidebar.slider("Limite superior umidade (% Umax)", 0.0, 1.0, 0.9)
+
+metodo_umidade = st.sidebar.selectbox(
+    "Método para definir faixa boa de umidade:",
+    ["Tradicional (percentual da Umax)", "Baseado na amplitude real"]
+)
+
+if metodo_umidade == "Baseado na amplitude real":
+    lim_inf_pct = st.sidebar.slider("Faixa inferior (% da amplitude)", 0.0, 1.0, 0.6)
+    lim_sup_pct = st.sidebar.slider("Faixa superior (% da amplitude)", 0.0, 1.0, 0.1)
+else:
+    lim_inf_pct = st.sidebar.slider("Limite inferior umidade (% Umax)", 0.0, 1.0, 0.8)
+    lim_sup_pct = st.sidebar.slider("Limite superior umidade (% Umax)", 0.0, 1.0, 0.9)
 
 if uploaded_file is not None:
     xls = pd.ExcelFile(uploaded_file)
@@ -198,7 +212,8 @@ if uploaded_file is not None:
             Tref_max=Tref_max,
             Tref_amp=Tref_amp,
             lim_inf_pct=lim_inf_pct,
-            lim_sup_pct=lim_sup_pct
+            lim_sup_pct=lim_sup_pct,
+            metodo_umidade=metodo_umidade
         )
 
         if resultados_ilp is not None and not resultados_ilp.empty:
@@ -266,7 +281,6 @@ def fechar_app():
         os._exit(0)
     threading.Thread(target=delayed_shutdown).start()
 
-st.markdown("---")
 if st.button("🚪 Encerrar aplicativo"):
     st.warning("Encerrando o aplicativo...")
     fechar_app()
