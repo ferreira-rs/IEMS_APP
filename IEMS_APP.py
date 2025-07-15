@@ -163,6 +163,37 @@ def calcula_por_ano_periodo(df, nome_df,
         return None
     return pd.concat(resultados, ignore_index=True)
 
+def calcula_para_varias_planilhas(nome_planilhas,
+                                  Tref_med=25,
+                                  Tref_max=35,
+                                  Tref_amp=10,
+                                  lim_inf_pct=0.8,
+                                  lim_sup_pct=0.9,
+                                  metodo_umidade="Tradicional (percentual da Umax)",
+                                  aplicar_penalizacao=False,
+                                  amplitude_max_global=None,
+                                  alfa=0.5):
+    resultados = []
+    for nome_df, df in nome_planilhas.items():
+        res = calcula_por_ano_periodo(
+            df,
+            nome_df,
+            Tref_med,
+            Tref_max,
+            Tref_amp,
+            lim_inf_pct,
+            lim_sup_pct,
+            metodo_umidade,
+            aplicar_penalizacao,
+            amplitude_max_global,
+            alfa
+        )
+        if res is not None:
+            resultados.append(res)
+    if not resultados:
+        return None
+    return pd.concat(resultados, ignore_index=True)
+
 def extrai_amplitude_maxima_global(planilhas):
     amplitudes = []
     for df in planilhas.values():
@@ -187,7 +218,12 @@ def to_excel(df):
 # ---------------- INTERFACE STREAMLIT ------------------
 
 st.set_page_config(page_title="Índice Microclimático", layout="wide")
+
+# Exibe o logo
+st.image("logo.png", width=150)  # ajuste o width como quiser
+
 st.title("Calculadora de Índices Microclimáticos do Solo")
+
 
 uploaded_file = st.file_uploader("Envie seu arquivo Excel com várias abas", type=["xlsx"])
 
