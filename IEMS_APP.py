@@ -1,4 +1,3 @@
-# ---------------- IMPORTAÇÃO DE PACOTES ------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,19 +9,24 @@ import threading
 
 # ---------------- FUNÇÕES DE CÁLCULO ------------------
 
-def calcula_umax_global_com_amplitude(df):
+def calcula_umax_global(df):
     Ustats = {}
     for prof in [20, 40, 60]:
         u_col = f'U{prof}'
         if u_col in df.columns:
-            umax = df[u_col].max(skipna=True)
-            umin = df[u_col].min(skipna=True)
             Ustats[u_col] = {
-                'max': umax,
-                'min': umin,
-                'amplitude': umax - umin
+                'max': df[u_col].max(skipna=True),
+                'min': df[u_col].min(skipna=True)
             }
     return Ustats
+
+def extrai_amplitude_maxima_global(planilhas):
+    amplitudes = []
+    for df in planilhas.values():
+        Ustats = calcula_umax_global(df)
+        for estat in Ustats.values():
+            amplitudes.append(estat['max'] - estat['min'])
+    return max(amplitudes) if amplitudes else None
 
 def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   Tref_med=25,
@@ -31,9 +35,8 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
                                   lim_inf_pct=0.8,
                                   lim_sup_pct=0.9,
                                   metodo_umidade="Tradicional (percentual da Umax)",
-                                  aplicar_penalizacao=False,
-                                  amplitude_max_global=None,
-                                  alfa=0.5):
+                                  alfa=0.5,
+                                  amplitude_max_global=None):
     dados = dados.copy()
     dados['Data'] = pd.to_datetime(dados['Data'], errors='coerce').dt.normalize()
 
@@ -74,41 +77,38 @@ def calcula_indice_microclimatico(dados, Umax_ref=None,
             resumo = pd.DataFrame({'Umid': umid_diaria}).dropna()
             IETS = np.nan
 
-        if Umax_ref and u_col in Umax_ref:
+        if Umax_ref is not None and u_col in Umax_ref:
             Umax_global = Umax_ref[u_col]['max']
             Umin_global = Umax_ref[u_col]['min']
-            amplitude_real = Umax_ref[u_col]['amplitude']
         else:
             Umax_global = dados[u_col].max(skipna=True)
             Umin_global = dados[u_col].min(skipna=True)
-            amplitude_real = Umax_global - Umin_global
 
         if metodo_umidade == "Baseado na amplitude real":
-            lim_inf = Umax_global - (amplitude_real * lim_inf_pct)
-            lim_sup = Umax_global - (amplitude_real * lim_sup_pct)
+            amplitude = Umax_global - Umin_global
+            lim_inf = Umax_global - (amplitude * lim_inf_pct)
+            lim_sup = Umax_global - (amplitude * lim_sup_pct)
         else:
+            amplitude = None
             lim_inf = Umax_global * lim_inf_pct
             lim_sup = Umax_global * lim_sup_pct
 
         prop = ((resumo['Umid'] >= lim_inf) & (resumo['Umid'] <= lim_sup)).mean()
         IRHE = prop
 
-        if metodo_umidade == "Baseado na amplitude real" and aplicar_penalizacao and amplitude_max_global and amplitude_max_global > 0:
-            penalizacao = 1 - alfa * (amplitude_real / amplitude_max_global)
-            IRHE = IRHE * penalizacao
+        # Penalização pela amplitude máxima global
+        if metodo_umidade == "Baseado na amplitude real" and amplitude_max_global and amplitude_max_global > 0 and alfa > 0:
+            penalizacao = 1 - alfa * (amplitude / amplitude_max_global)
+            IRHE *= penalizacao
 
         IEMS = (IETS + IRHE) / 2 if not np.isnan(IETS) else IRHE
 
-        resultado = {
+        resultados.append({
             'Profundidade': prof,
             'IETS': IETS,
             'IRHE': IRHE,
             'IEMS': IEMS
-        }
-        if metodo_umidade == "Baseado na amplitude real" and aplicar_penalizacao:
-            resultado['Amplitude_real'] = amplitude_real
-
-        resultados.append(resultado)
+        })
 
     if not resultados:
         return None
@@ -121,9 +121,8 @@ def calcula_por_ano_periodo(df, nome_df,
                             lim_inf_pct=0.8,
                             lim_sup_pct=0.9,
                             metodo_umidade="Tradicional (percentual da Umax)",
-                            aplicar_penalizacao=False,
-                            amplitude_max_global=None,
-                            alfa=0.5):
+                            alfa=0.5,
+                            amplitude_max_global=None):
     df = df.copy()
     df['Data'] = pd.to_datetime(df['Data'], errors='coerce').dt.normalize()
     df['Mes'] = df['Data'].dt.month
@@ -131,7 +130,7 @@ def calcula_por_ano_periodo(df, nome_df,
     df['Periodo'] = np.where(df['Mes'].isin([10,11,12,1,2,3]), 'Umido', 'Seco')
     df['AnoRef'] = np.where(df['Mes'].isin([1,2,3]), df['Ano'] -1, df['Ano'])
 
-    Umax_ref = calcula_umax_global_com_amplitude(df)
+    Umax_ref = calcula_umax_global(df)
 
     resultados = []
     grouped = df.groupby(['AnoRef', 'Periodo'])
@@ -148,9 +147,8 @@ def calcula_por_ano_periodo(df, nome_df,
             lim_inf_pct=lim_inf_pct,
             lim_sup_pct=lim_sup_pct,
             metodo_umidade=metodo_umidade,
-            aplicar_penalizacao=aplicar_penalizacao,
-            amplitude_max_global=amplitude_max_global,
-            alfa=alfa
+            alfa=alfa,
+            amplitude_max_global=amplitude_max_global
         )
         if res is None:
             continue
@@ -170,9 +168,8 @@ def calcula_para_varias_planilhas(nome_planilhas,
                                   lim_inf_pct=0.8,
                                   lim_sup_pct=0.9,
                                   metodo_umidade="Tradicional (percentual da Umax)",
-                                  aplicar_penalizacao=False,
-                                  amplitude_max_global=None,
-                                  alfa=0.5):
+                                  alfa=0.5,
+                                  amplitude_max_global=None):
     resultados = []
     for nome_df, df in nome_planilhas.items():
         res = calcula_por_ano_periodo(
@@ -184,23 +181,14 @@ def calcula_para_varias_planilhas(nome_planilhas,
             lim_inf_pct,
             lim_sup_pct,
             metodo_umidade,
-            aplicar_penalizacao,
-            amplitude_max_global,
-            alfa
+            alfa,
+            amplitude_max_global
         )
         if res is not None:
             resultados.append(res)
     if not resultados:
         return None
     return pd.concat(resultados, ignore_index=True)
-
-def extrai_amplitude_maxima_global(planilhas):
-    amplitudes = []
-    for df in planilhas.values():
-        uref = calcula_umax_global_com_amplitude(df)
-        for estat in uref.values():
-            amplitudes.append(estat['amplitude'])
-    return max(amplitudes) if amplitudes else None
 
 def gerar_png_para_download(plot, nome_arquivo="grafico.png", dpi=300):
     buffer = BytesIO()
@@ -220,10 +208,9 @@ def to_excel(df):
 st.set_page_config(page_title="Índice Microclimático", layout="wide")
 
 # Exibe o logo
-st.image("IEMS_LOGO.png", width=150)  # ajuste o width como quiser
+st.image("IEMS_LOGO.png", width=100)  # ajuste o width como quiser
 
 st.title("Calculadora de Índices Microclimáticos do Solo")
-
 
 uploaded_file = st.file_uploader("Envie seu arquivo Excel com várias abas", type=["xlsx"])
 
@@ -241,67 +228,42 @@ metodo_umidade = st.sidebar.selectbox(
 if metodo_umidade == "Baseado na amplitude real":
     lim_inf_pct = st.sidebar.slider("Faixa inferior (% da amplitude)", 0.0, 1.0, 0.6)
     lim_sup_pct = st.sidebar.slider("Faixa superior (% da amplitude)", 0.0, 1.0, 0.1)
-    aplicar_penalizacao = st.sidebar.checkbox("Aplicar penalização por amplitude")
     alfa = st.sidebar.slider("Alfa (intensidade da penalização)", 0.0, 1.0, 0.5)
 else:
     lim_inf_pct = st.sidebar.slider("Limite inferior umidade (% Umax)", 0.0, 1.0, 0.8)
     lim_sup_pct = st.sidebar.slider("Limite superior umidade (% Umax)", 0.0, 1.0, 0.9)
-    aplicar_penalizacao = False
-    alfa = 0.0
-
-# Botões de cálculo
-st.subheader("Escolha a ação")
-calcular_iets = st.button("Calcular apenas IETS")
-calcular_irhe = st.button("Calcular apenas IRHE")
-calcular_iems = st.button("Calcular IEMS completo")
-gerar_grafico = st.button("📊 Gerar gráfico")
-
-planilhas = {}
-resultados = None
-amplitude_max_global = None
+    alfa = 0.0  # não aplica penalização se não for amplitude real
 
 if uploaded_file is not None:
     xls = pd.ExcelFile(uploaded_file)
     abas = xls.sheet_names
-    if abas:
-        st.success(f"{len(abas)} abas carregadas: {abas}")
+    if not abas:
+        st.error("Arquivo não possui abas válidas.")
+    else:
+        st.write(f"Abas encontradas: {abas}")
         planilhas = {aba: xls.parse(aba) for aba in abas}
-        if metodo_umidade == "Baseado na amplitude real" and aplicar_penalizacao:
+
+        amplitude_max_global = None
+        if metodo_umidade == "Baseado na amplitude real":
             amplitude_max_global = extrai_amplitude_maxima_global(planilhas)
 
-        if calcular_iets:
-            resultados = calcula_para_varias_planilhas(
-                planilhas, Tref_med, Tref_max, Tref_amp,
-                lim_inf_pct, lim_sup_pct,
-                metodo_umidade, False, None, 0.0
-            )
-            if resultados is not None:
-                st.subheader("Resultado - IETS")
-                st.dataframe(resultados[['Ano', 'Periodo', 'Origem', 'Profundidade', 'IETS']])
-        elif calcular_irhe:
-            resultados = calcula_para_varias_planilhas(
-                planilhas, Tref_med, Tref_max, Tref_amp,
-                lim_inf_pct, lim_sup_pct,
-                metodo_umidade, aplicar_penalizacao, amplitude_max_global, alfa
-            )
-            if resultados is not None:
-                st.subheader("Resultado - IRHE (com penalização e amplitude)")
-                cols = ['Ano', 'Periodo', 'Origem', 'Profundidade', 'IRHE']
-                if aplicar_penalizacao and metodo_umidade == "Baseado na amplitude real":
-                    cols.append('Amplitude_real')
-                st.dataframe(resultados[cols])
-        elif calcular_iems:
-            resultados = calcula_para_varias_planilhas(
-                planilhas, Tref_med, Tref_max, Tref_amp,
-                lim_inf_pct, lim_sup_pct,
-                metodo_umidade, aplicar_penalizacao, amplitude_max_global, alfa
-            )
-            if resultados is not None:
-                st.subheader("Resultado - IEMS completo")
-                st.dataframe(resultados[['Ano', 'Periodo', 'Origem', 'Profundidade', 'IETS', 'IRHE', 'IEMS']])
+        resultados_ilp = calcula_para_varias_planilhas(
+            planilhas,
+            Tref_med=Tref_med,
+            Tref_max=Tref_max,
+            Tref_amp=Tref_amp,
+            lim_inf_pct=lim_inf_pct,
+            lim_sup_pct=lim_sup_pct,
+            metodo_umidade=metodo_umidade,
+            alfa=alfa,
+            amplitude_max_global=amplitude_max_global
+        )
 
-        if resultados is not None and gerar_grafico:
-            dados_long = resultados.melt(
+        if resultados_ilp is not None and not resultados_ilp.empty:
+            st.subheader("Resultados")
+            st.dataframe(resultados_ilp)
+
+            dados_long = resultados_ilp.melt(
                 id_vars=['Ano', 'Periodo', 'Origem', 'Profundidade'],
                 value_vars=['IETS', 'IRHE', 'IEMS'],
                 var_name='Indice',
@@ -309,10 +271,10 @@ if uploaded_file is not None:
             )
 
             anos_disponiveis = sorted(dados_long['Ano'].unique())
-            indices_disponiveis = ['IETS', 'IRHE', 'IEMS']
+            indice_disponivel = ['IETS', 'IRHE', 'IEMS']
 
             ano_selecionado = st.selectbox("Selecione o Ano para o gráfico", anos_disponiveis)
-            indice_selecionado = st.selectbox("Selecione o Índice para o gráfico", indices_disponiveis)
+            indice_selecionado = st.selectbox("Selecione o Índice para o gráfico", indice_disponivel)
 
             df_graf = dados_long[(dados_long['Ano'] == ano_selecionado) & (dados_long['Indice'] == indice_selecionado)]
 
@@ -341,7 +303,7 @@ if uploaded_file is not None:
                     mime="image/png"
                 )
 
-            excel_data = to_excel(resultados)
+            excel_data = to_excel(resultados_ilp)
 
             st.download_button(
                 label="📄 Baixar resultados em Excel",
@@ -349,8 +311,8 @@ if uploaded_file is not None:
                 file_name="resultados_microclimaticos.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-    else:
-        st.error("Arquivo não possui abas válidas.")
+        else:
+            st.warning("Não foi possível calcular os índices para os dados enviados.")
 else:
     st.info("Faça upload do arquivo Excel para iniciar o cálculo.")
 
