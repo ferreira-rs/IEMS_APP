@@ -220,7 +220,7 @@ def to_excel(df):
 st.set_page_config(page_title="Índice Microclimático", layout="wide")
 
 # Exibe o logo
-st.image("logo.png", width=150)  # ajuste o width como quiser
+st.image("IEMS_LOGO.png", width=150)  # ajuste o width como quiser
 
 st.title("Calculadora de Índices Microclimáticos do Solo")
 
